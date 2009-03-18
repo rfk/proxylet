@@ -78,7 +78,7 @@ class Dispatcher:
         self.servers = {}
         self._closed = False
         # To ensure responses are read and delivered in order, we
-        # process them one-at-a-time out of a queue.
+        # process them sequentially out of a queue.
         self._responses = []
         self._processingResps = False
 
@@ -87,7 +87,10 @@ class Dispatcher:
         """Request dispatch loop."""
         try:
          while not self._closed:
-          req = HTTPRequest(self.client)
+          try:
+            req = HTTPRequest(self.client)
+          except (IOError,socket.error):
+            break
           # If an invalid request is received, send 400 Bad Request
           # and close the connection immediately
           if not req.valid:
@@ -97,7 +100,8 @@ class Dispatcher:
             break
           mapping = self.mapper(req)
           if mapping is None:
-            resp = StringStream("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+            content = "Not Found"
+            resp = StringStream("HTTP/1.1 404 Not Found\r\nContent-Length: %d\r\n\r\n%s" % (len(content),content))
             server = Nullify([])
           else:
             (host,port,rewriter) = mapping
@@ -107,8 +111,7 @@ class Dispatcher:
             if rewriter is not None:
               (req,resp) = rewriter(req,resp)
           self.sendResponse(resp)
-          for reqLn in req:
-            server.write(reqLn)
+          self.sendRequest(req,server)
         except:
           (_,ex,tb) = sys.exc_info()
           traceback.print_tb(tb)
@@ -139,6 +142,10 @@ class Dispatcher:
         self._responses.append(resp)
         # The processing loop may have terminated, make sure it starts again
         self.processResponses()
+
+    def sendRequest(self,req,server):
+        for ln in req:
+          server.write(ln)
         
     @uspawn
     def processResponses(self):
@@ -200,23 +207,19 @@ def _demo_mapper(req):
     """Simple demonstration mapper function, also for testing purposes.
     Proxies the following:
         * /rfk/      :   my personal website
-        * /sm/       :   sphericalmatrix website
-        * /sm-dav/   :   sphericalmatrix website editing via webdav
-        * /svn/      :   sphericalmarix SVN repos
+        * /g/        :   google website
+        * /morph/    :   morph SVN repo
     """
     from relocate import DrupalRelocator, DAVRelocator, SVNRelocator, Relocator
-    sm = DrupalRelocator("http://localhost:8080/sm","http://www.sphericalmatrix.com/")
-    dav = DAVRelocator("http://localhost:8080/sm-dav","http://sphericalmatrix.com/sphericalmatrix/www-dav")
-    svn = SVNRelocator("http://localhost:8080/svn","http://svn.sphericalmatrix.com/morph")
     rfk = Relocator("http://localhost:8080/rfk","http://www.rfk.id.au/")
-    if dav.matchesLocal(req.reqURI):
-      return dav.mapping
-    if sm.matchesLocal(req.reqURI):
-      return sm.mapping
+    goog = Relocator("http://localhost:8080/g","http://www.google.com/")
+    svn = SVNRelocator("http://localhost:8080/svn","http://sphericalmatrix.com/svn/morph")
     if svn.matchesLocal(req.reqURI):
       return svn.mapping
     if rfk.matchesLocal(req.reqURI):
       return rfk.mapping
+    if goog.matchesLocal(req.reqURI):
+      return goog.mapping
     return None
 
 def _demo():

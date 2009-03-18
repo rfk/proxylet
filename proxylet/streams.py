@@ -13,16 +13,19 @@ XMLRewriter.
 from paste import httpheaders as hdr
 from xml.parsers import expat
 
+from eventlet.greenio import GreenFile
+
 
 class StreamWrapper(object):
     """Base class for wrapping of streams."""
 
     def __init__(self,stream):
+        if not hasattr(stream,"readline") and hasattr(stream,"recv"):
+            stream = GreenFile(stream)
         self.stream = stream
 
     def readline(self,size=None):
-        ln = self.stream.readline(size)
-        return ln
+        return self.stream.readline(size)
 
     def __iter__(self):
         ln = self.readline()
@@ -31,7 +34,7 @@ class StreamWrapper(object):
           ln = self.readline()
 
     def write(self,data):
-        self.stream.write(data)
+        return self.stream.write(data)
 
     def close(self):
         self.stream.close()
